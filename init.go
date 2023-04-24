@@ -5,99 +5,90 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"fmt"
-	"log"
 	"net/http"
-	"os"
 
 	"github.com/gin-gonic/gin"
+	_ "github.com/lib/pq"
 )
 
-type ClaimRequest struct {
-	NRIC          string `json:"nric" binding:"required"`
+type NRICWallet struct {
+	NRIC         string `json:"nric" binding:"required"`
 	WalletAddress string `json:"wallet_address" binding:"required"`
 }
 
-type ClaimResponse struct {
-	Receipt string `json:"receipt"`
-}
+var db *sql.DB
 
 func main() {
-	db, err := sql.Open("postgres", "postgres://user:password@postgres:5432/mydb?sslmode=disable")
+	var err error
+
+	// Connect to the database
+	db, err = sql.Open("postgres", "host=db port=5432 user=admin password=admin dbname=mydb sslmode=disable")
 	if err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
 	defer db.Close()
 
+	// Test the database connection
 	err = db.Ping()
 	if err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
 
-	router := gin.Default()
+	// Create a new Gin router
+	r := gin.Default()
 
-	router.POST("/claim", func(c *gin.Context) {
-		var req ClaimRequest
-		err := c.ShouldBindJSON(&req)
-		if err != nil {
+	// Define the POST route for collecting NRIC and wallet address
+	r.POST("/nric-wallet", func(c *gin.Context) {
+		var nw NRICWallet
+
+		// Bind the request body to the NRICWallet struct
+		if err := c.ShouldBindJSON(&nw); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
 
-		// Check if NRIC is unique
+		// Check if the NRIC already exists in the database
 		var count int
-		err = db.QueryRow("SELECT COUNT(*) FROM claims WHERE nric = $1", req.NRIC).Scan(&count)
+		err := db.QueryRow("SELECT COUNT(*) FROM nric_wallet WHERE nric = $1", nw.NRIC).Scan(&count)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to query database"})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
 			return
 		}
 		if count > 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "NRIC is already associated with a wallet address"})
+			c.JSON(http.StatusConflict, gin.H{"error": "NRIC already exists"})
 			return
 		}
 
-		// Check if wallet address is unique
-		err = db.QueryRow("SELECT COUNT(*) FROM claims WHERE wallet_address = $1", req.WalletAddress).Scan(&count)
+		// Check if the wallet address already exists in the database
+		err = db.QueryRow("SELECT COUNT(*) FROM nric_wallet WHERE wallet_address = $1", nw.WalletAddress).Scan(&count)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to query database"})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
 			return
 		}
 		if count > 0 {
-			//c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Wallet address is already associated with an NRIC"})
+			c.JSON(http.StatusConflict, gin.H{"error": "Wallet address already exists"})
 			return
 		}
 
-		// Insert claim into database
-		_, err = db.Exec("INSERT INTO claims (nric, wallet_address) VALUES ($1, $2)", req.NRIC, req.WalletAddress)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to insert claim into database"})
-			return
-		}
-
-		// Generate receipt hash
+		// Insert the new NRIC and wallet address into the database
 		hasher := md5.New()
-		hasher.Write([]byte(fmt.Sprintf("%v", req)))
+		//hashing is kind of one-way fn. compared to encryption, since with correct key we can decrypt.
+		//However, in context of API resp. tix. it's okay to use HASH since, it cannot to manipulated by third-party or faked.
+		//combination of encryption and hashing may be the best choice for achieving the desired security properties.
+		hasher.Write([]byte(nw.NRIC + nw.WalletAddress))
 		receipt := hex.EncodeToString(hasher.Sum(nil))
+		_, err = db.Exec("INSERT INTO nric_wallet (nric, wallet_address, receipt) VALUES ($1, $2, $3)", nw.NRIC, nw.WalletAddress, receipt)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
+			return
+		}
 
-		c.JSON(http.StatusOK, ClaimResponse{Receipt: receipt})
+		// Return the receipt
+		c.JSON(http.StatusCreated, gin.H{"receipt": receipt})
 	})
 
-	err = router.Run(":8080")
-	if err != nil {
-		log.Fatal(err)
+	// Start the server
+	if err := r.Run(":8080"); err != nil {
+		panic(err)
 	}
-}
-
-//alternate way to connect DB, declare const() method which holds this var.
-func connectToDB() (*sql.DB, error) {
-	dbHost := os.Getenv(dbHostKey)
-	dbPort := os.Getenv(dbPortKey)
-	dbUser := os.Getenv(dbUserKey)
-	dbPassword := os.Getenv(dbPasswordKey)
-	dbName := os.Getenv(dbNameKey)
-
-	if dbHost == "" || dbPort == "" || dbUser == "" || dbPassword == "" || dbName == "" {
-		return nil, errors.New("database configuration not provided")
-	}
-
 }
