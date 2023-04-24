@@ -1,9 +1,9 @@
-version: '3.9'
+version: "3.9"
 services:
   db:
     image: postgres:latest
-    restart: always 
-    #better availabilty 
+    restart: always
+    #better availabilty
     environment:
       POSTGRES_PASSWORD: admin
       POSTGRES_USER: admin
@@ -28,12 +28,14 @@ services:
       DB_USER: admin
       DB_PASSWORD: admin
     networks:
+      #you can also define custom networks that your containers will use. Can leave as blank, in that case default project directory n/w with bridge driver is created
       - my-network
-      #you can also define custom networks that your containers will use. Can leave as blank, in that case default project directory n/w with bridge driver is created 
+      - default
     ports:
       - "3000:3000"
       #default react port
 volumes:
   dbdata:
+  # Define a custom network for the containers to use
 networks:
   my-network:
