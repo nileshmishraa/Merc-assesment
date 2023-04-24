@@ -16,45 +16,38 @@ function App() {
   };
 
   const handleClaim = async () => {
-    // validate the NRIC entered by the user
-    if (!nric || !/^[STFG]\d{7}[A-Z]$/.test(nric)) {
-      setError('Please enter a valid NRIC.');
-      return;
-    }
+    setLoading(true);
 
     try {
-      setLoading(true);
-
       // Load the smart contract instance
       const networkId = await web3.eth.net.getId();
       const deployedNetwork = MyNFTContract.networks[networkId];
       if (!deployedNetwork) {
-        setError('MyNFT contract is not deployed on the current network.');
-        return;
+        throw new Error(`Contract not deployed to network with id ${networkId}`);
       }
       const contract = new web3.eth.Contract(MyNFTContract.abi, deployedNetwork.address);
 
       // Mint a new NFT and store the user's NRIC as the receipt
-      const defaultAccount = await web3.eth.getAccounts().then((accounts) => accounts[0]);
-      const result = await contract.methods.claim(nric).send({ from: defaultAccount });
-
-      // check for any transaction errors
-      if (result.status !== '0x1') {
-        setError('Failed to claim NFT. Please try again later.');
-        return;
+      const accounts = await web3.eth.getAccounts();
+      if (!accounts.length) {
+        throw new Error('No accounts found. Please connect to an Ethereum wallet.');
       }
+      const result = await contract.methods.claim(nric).send({ from: accounts[0] });
+      if (!result.events.Transfer || !result.events.Transfer.returnValues) {
+        throw new Error('Failed to retrieve NFT metadata. Please check your transaction history.');
+      }
+      const tokenId = result.events.Transfer.returnValues.tokenId;
 
       // Get the metadata of the newly minted NFT
-      const tokenId = await contract.methods.getTokenByIndex(0).call();
       const metadata = await contract.methods.tokenURI(tokenId).call();
 
       setNft({ tokenId, metadata });
-      setLoading(false);
       setError(null);
-    } catch (error) {
-      console.error(error);
+    } catch (err) {
+      console.error(err);
+      setError(err.message || 'Failed to claim NFT');
+    } finally {
       setLoading(false);
-      setError('Something went wrong, please try again later.');
     }
   };
 
