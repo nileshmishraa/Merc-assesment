@@ -1,0 +1,39 @@
+version: '3.9'
+services:
+  db:
+    image: postgres:latest
+    restart: always 
+    #better availabilty 
+    environment:
+      POSTGRES_PASSWORD: admin
+      POSTGRES_USER: admin
+      POSTGRES_DB: mydb
+    volumes:
+      - dbdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - my-network
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: always
+    depends_on:
+      - db
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: mydb
+      DB_USER: admin
+      DB_PASSWORD: admin
+    networks:
+      - my-network
+      #you can also define custom networks that your containers will use. Can leave as blank, in that case default project directory n/w with bridge driver is created 
+    ports:
+      - "3000:3000"
+      #default react port
+volumes:
+  dbdata:
+networks:
+  my-network:
